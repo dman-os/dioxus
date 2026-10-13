@@ -97,6 +97,7 @@ desktop = ["dep:dioxus-desktop", "dioxus-config-macro/desktop"]
 mobile = ["dep:dioxus-desktop", "dioxus-config-macro/mobile"]
 web = [
   "dep:dioxus-web",
+  "subsecond/web",
   "dioxus-fullstack?/web",
   "dioxus-config-macro/web",
   "dep:dioxus-cli-config",

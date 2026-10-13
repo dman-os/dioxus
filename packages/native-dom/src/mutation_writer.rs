@@ -270,14 +270,15 @@ impl DioxusState {
 
     /// Apply the buffered dioxus mutations to `doc`, driving the blitz backend
     /// from the local stack machine.
-    pub(crate) fn apply_buffered_mutations(&mut self, doc: &mut BaseDocument) {
+    pub fn apply_buffered_mutations(&mut self, doc: &mut BaseDocument) {
+
         let Self {
             stack,
             event_handler_counts,
             queued_mounted_events,
             buffered_mutations,
         } = self;
-        let mut writer: MutationWriter<'_> = StackWriter::new(
+        let mut writer = StackWriter::new(
             stack,
             BlitzBackend {
                 docm: doc.mutate(),
@@ -288,12 +289,6 @@ impl DioxusState {
         buffered_mutations.replay(&mut writer);
     }
 }
-
-/// A writer for mutations that can be used with the RealDom.
-///
-/// The stack-machine bookkeeping lives in [`StackWriter`]; this renderer only
-/// supplies the real tree semantics via [`BlitzBackend`].
-pub(crate) type MutationWriter<'a> = StackWriter<'a, BlitzBackend<'a>>;
 
 /// The blitz-backed "real semantics" for the dioxus stack machine.
 pub(crate) struct BlitzBackend<'a> {

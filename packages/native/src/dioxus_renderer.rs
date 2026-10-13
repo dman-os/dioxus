@@ -62,7 +62,10 @@ impl DioxusNativeWindowRenderer {
         Self::with_options(RendererOptions::default())
     }
 
-    #[cfg(any(feature = "vello-hybrid", feature = "vello"))]
+    #[cfg(all(
+        any(feature = "vello-hybrid", feature = "vello"),
+        not(feature = "skia")
+    ))]
     pub fn with_features_and_limits(features: Option<Features>, limits: Option<Limits>) -> Self {
         Self::with_options(RendererOptions {
             features,

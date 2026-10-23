@@ -268,16 +268,42 @@ impl DioxusState {
         self.stack.element_to_node(element_id)
     }
 
+    /// Build a writer that applies dioxus mutations directly to `doc`, driving the blitz backend
+    /// from the local stack machine.
+    ///
+    /// Unlike [`Self::apply_buffered_mutations`] this neither reads nor drains the buffered
+    /// mutations: it lets an external producer drive the same stack machine and element-id mapping.
+    /// A host embedding a separately rendered tree — for example a WebAssembly component guest
+    /// sending its own mutation stream — uses this to commit into the subtree rooted at the node
+    /// this state was created for.
+    pub fn writer<'a>(&'a mut self, doc: &'a mut BaseDocument) -> impl WriteMutations + 'a {
+        let Self {
+            stack,
+            event_handler_counts,
+            queued_mounted_events,
+            ..
+        } = self;
+        StackWriter::new(
+            stack,
+            BlitzBackend {
+                docm: doc.mutate(),
+                event_handler_counts,
+                queued_mounted_events,
+            },
+        )
+    }
+
     /// Apply the buffered dioxus mutations to `doc`, driving the blitz backend
     /// from the local stack machine.
-    pub(crate) fn apply_buffered_mutations(&mut self, doc: &mut BaseDocument) {
+    pub fn apply_buffered_mutations(&mut self, doc: &mut BaseDocument) {
+
         let Self {
             stack,
             event_handler_counts,
             queued_mounted_events,
             buffered_mutations,
         } = self;
-        let mut writer: MutationWriter<'_> = StackWriter::new(
+        let mut writer = StackWriter::new(
             stack,
             BlitzBackend {
                 docm: doc.mutate(),
@@ -288,12 +314,6 @@ impl DioxusState {
         buffered_mutations.replay(&mut writer);
     }
 }
-
-/// A writer for mutations that can be used with the RealDom.
-///
-/// The stack-machine bookkeeping lives in [`StackWriter`]; this renderer only
-/// supplies the real tree semantics via [`BlitzBackend`].
-pub(crate) type MutationWriter<'a> = StackWriter<'a, BlitzBackend<'a>>;
 
 /// The blitz-backed "real semantics" for the dioxus stack machine.
 pub(crate) struct BlitzBackend<'a> {

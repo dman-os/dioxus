@@ -305,6 +305,10 @@ pub unsafe fn get_jump_table() -> Option<&'static JumpTable> {
 
     Some(unsafe { &*ptr })
 }
+#[cfg(any(
+    not(target_arch = "wasm32"),
+    all(target_arch = "wasm32", feature = "web")
+))]
 unsafe fn commit_patch(table: JumpTable) {
     APP_JUMP_TABLE.store(
         Box::into_raw(Box::new(table)),
@@ -481,6 +485,16 @@ impl<A, M, F: HotFunction<A, M>> HotFn<A, M, F> {
     }
 }
 
+/// Report that hot-patching requires a platform-specific loader on non-browser Wasm.
+///
+/// # Safety
+/// This function performs no patching and is safe to call; the unsafe signature is retained
+/// so both platform implementations have the same API.
+#[cfg(all(target_arch = "wasm32", not(feature = "web")))]
+pub unsafe fn apply_patch(_table: JumpTable) -> Result<(), PatchError> {
+    Err(PatchError::UnsupportedPlatform)
+}
+
 /// Apply the patch using a given jump table.
 ///
 /// # Safety
@@ -495,10 +509,12 @@ impl<A, M, F: HotFunction<A, M>> HotFn<A, M, F> {
 ///
 /// This function will load the library and thus allocates. In cannot be used when the program is
 /// stopped (ie in a signal handler).
-pub unsafe fn apply_patch(mut table: JumpTable) -> Result<(), PatchError> {
+#[cfg(not(all(target_arch = "wasm32", not(feature = "web"))))]
+pub unsafe fn apply_patch(table: JumpTable) -> Result<(), PatchError> {
     // On non-wasm platforms we can just use libloading and the known aslr offsets to load the library
     #[cfg(any(unix, windows))]
     {
+        let mut table = table;
         // on android we try to circumvent permissions issues by copying the library to a memmap and then libloading that
         #[cfg(target_os = "android")]
         let lib = Box::leak(Box::new(unsafe { android_memmap_dlopen(&table.lib)? }));
@@ -547,8 +563,9 @@ pub unsafe fn apply_patch(mut table: JumpTable) -> Result<(), PatchError> {
     };
 
     // On wasm, we need to download the module, compile it, and then run it.
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", feature = "web"))]
     wasm_bindgen_futures::spawn_local(async move {
+        let mut table = table;
         use js_sys::{
             ArrayBuffer, Object, Reflect,
             WebAssembly::{self, Instance, Memory, Module, Table},
@@ -698,6 +715,9 @@ pub enum PatchError {
     /// dependency into the public API.
     #[error("Failed to load library: {0}")]
     Dlopen(String),
+    /// Hot-patching is not available for this target without a platform loader.
+    #[error("hot-patching is unavailable without the Subsecond web loader")]
+    UnsupportedPlatform,
 
     /// The patch failed to apply on Android, most likely due to a permissions issue.
     #[error("Failed to load library on Android: {0}")]

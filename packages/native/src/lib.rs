@@ -54,7 +54,10 @@ pub fn current_android_app() -> android_activity::AndroidApp {
 #[cfg_attr(docsrs, doc(cfg(target_os = "android")))]
 pub use android_activity::AndroidApp;
 
-#[cfg(any(feature = "vello", feature = "vello-hybrid"))]
+#[cfg(all(
+    any(feature = "vello", feature = "vello-hybrid"),
+    not(feature = "skia")
+))]
 pub use {
     dioxus_renderer::{Features, Limits},
     wgpu_context::DeviceHandle,
@@ -129,12 +132,18 @@ pub fn launch_cfg_with_props<P: Clone + 'static, M: 'static>(
     }
 
     // Read config values
-    #[cfg(any(feature = "vello", feature = "vello-hybrid"))]
+    #[cfg(all(
+        any(feature = "vello", feature = "vello-hybrid"),
+        not(feature = "skia")
+    ))]
     let (mut features, mut limits) = (None, None);
     let mut window_attributes = None;
     let mut config = None;
     for mut cfg in configs {
-        #[cfg(any(feature = "vello", feature = "vello-hybrid"))]
+        #[cfg(all(
+            any(feature = "vello", feature = "vello-hybrid"),
+            not(feature = "skia")
+        ))]
         {
             cfg = try_read_config!(cfg, features, Features);
             cfg = try_read_config!(cfg, limits, Limits);
@@ -221,14 +230,20 @@ pub fn launch_cfg_with_props<P: Clone + 'static, M: 'static>(
             ..Default::default()
         },
     );
-    #[cfg(any(feature = "vello", feature = "vello-hybrid"))]
+    #[cfg(all(
+        any(feature = "vello", feature = "vello-hybrid"),
+        not(feature = "skia")
+    ))]
     let renderer = DioxusNativeWindowRenderer::with_options(RendererOptions {
         base_color: config.base_color,
         alpha_mode: config.alpha_mode,
         features,
         limits,
     });
-    #[cfg(not(any(feature = "vello", feature = "vello-hybrid")))]
+    #[cfg(not(all(
+        any(feature = "vello", feature = "vello-hybrid"),
+        not(feature = "skia")
+    )))]
     let renderer = DioxusNativeWindowRenderer::with_options(RendererOptions {
         base_color: config.base_color,
         alpha_mode: config.alpha_mode,

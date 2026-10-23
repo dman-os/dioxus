@@ -171,7 +171,7 @@ dioxus-cli-config = { path = "packages/cli-config", version = "=0.8.0-alpha.3" }
 
 # subsecond
 subsecond-types = { path = "packages/subsecond/subsecond-types", version = "=0.8.0-alpha.3" }
-subsecond = { path = "packages/subsecond/subsecond", version = "=0.8.0-alpha.3" }
+subsecond = { path = "packages/subsecond/subsecond", default-features = false, version = "=0.8.0-alpha.3" }
 
 # wasm-split
 wasm-splitter = { path = "packages/wasm-split/wasm-split", version = "=0.8.0-alpha.3" }

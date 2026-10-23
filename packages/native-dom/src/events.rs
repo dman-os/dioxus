@@ -379,6 +379,17 @@ impl HasKeyboardData for BlitzKeyboardData {
 #[derive(Clone)]
 pub struct NativePointerData(pub(crate) BlitzPointerEvent);
 
+impl NativePointerData {
+    /// Wraps a Blitz pointer event as Dioxus mouse/pointer event data.
+    ///
+    /// Lets a host that receives Blitz DOM events translate them for a Dioxus consumer it does not
+    /// own — for example a component guest whose virtual DOM lives in another address space —
+    /// using the same data type this crate uses for its own virtual DOM.
+    pub fn new(event: BlitzPointerEvent) -> Self {
+        Self(event)
+    }
+}
+
 impl InteractionLocation for NativePointerData {
     fn client_coordinates(&self) -> ClientPoint {
         ClientPoint::new(self.0.client_x() as f64, self.0.client_y() as f64)

@@ -49,7 +49,7 @@ enum BufferedMutation {
 ///
 /// The buffer keeps its allocations when it is replayed so that they are reused by later renders.
 #[derive(Default)]
-pub(crate) struct MutationBuffer {
+pub struct MutationBuffer {
     mutations: Vec<BufferedMutation>,
     /// The concatenated string arguments of `mutations`
     strings: String,
@@ -75,7 +75,7 @@ impl MutationBuffer {
     }
 
     /// Apply the buffered mutations to `to` and empty the buffer
-    pub(crate) fn replay(&mut self, to: &mut impl WriteMutations) {
+    pub fn replay(&mut self, to: &mut impl WriteMutations) {
         let strings = self.strings.as_str();
         let str = |span: StrSpan| &strings[span.start as usize..span.end as usize];
 

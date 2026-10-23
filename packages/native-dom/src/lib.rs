@@ -11,12 +11,17 @@
 
 mod dioxus_document;
 mod events;
-mod mutation_buffer;
+pub mod mutation_buffer;
 mod mutation_writer;
 mod write_once_attr;
 pub use blitz_dom::DocumentConfig;
 pub use dioxus_document::DioxusDocument;
-pub use events::{NodeHandle, synthetic_click_event, synthetic_form_event};
+pub use events::{
+    NativeFocusData, NativeFormData, NativePointerData, NodeHandle, synthetic_click_event,
+    synthetic_form_event,
+};
+pub use mutation_buffer::MutationBuffer;
+pub use mutation_writer::DioxusState;
 pub use write_once_attr::{CustomWidgetAttr, SubDocumentAttr};
 
 pub use blitz_dom::NodeId;

@@ -9,6 +9,7 @@ plugins {
 android {
     namespace="{{ application_id }}"
     compileSdk = {{ compile_sdk }}
+    buildToolsVersion = "{{ compile_sdk }}.0.0"
     defaultConfig {
         applicationId = "{{ application_id }}"
         minSdk = {{ min_sdk }}

@@ -122,13 +122,30 @@ impl WebsysDom {
 }
 
 fn walk_event_for_id(event: &web_sys::Event) -> Option<(ElementId, web_sys::Element)> {
-    let target = event
-        .target()
-        .expect("missing target")
-        .dyn_into::<web_sys::Node>()
-        .expect("not a valid node");
+    // Bubbling events are caught by one listener on the root. If they started
+    // inside a shadow tree, `target()` is already retargeted to the shadow
+    // host, so start from the first node of the composed path instead.
+    // Non-bubbling listeners sit on the element itself and keep `target()`.
+    let target = if event.bubbles() {
+        crate::events::event_origin(event)
+    } else {
+        event.target()
+    }
+    .expect("missing target")
+    .dyn_into::<web_sys::Node>()
+    .expect("not a valid node");
 
     walk_element_for_id(&target)
+}
+
+/// The element-or-shadow-root parent used when walking towards the root:
+/// crosses shadow boundaries by going from a shadow root to its host.
+fn walk_parent_element(node: &Node) -> Option<web_sys::Element> {
+    let parent = node.parent_node()?;
+    match parent.dyn_ref::<web_sys::ShadowRoot>() {
+        Some(shadow) => Some(shadow.host()),
+        None => parent.dyn_into::<web_sys::Element>().ok(),
+    }
 }
 
 fn walk_element_for_id(target: &Node) -> Option<(ElementId, web_sys::Element)> {
@@ -147,9 +164,9 @@ fn walk_element_for_id(target: &Node) -> Option<(ElementId, web_sys::Element)> {
             // Walk the tree upwards until we actually find an event target
             (None, target_element) => {
                 let parent = match target_element.as_ref() {
-                    Some(el) => el.parent_element(),
+                    Some(el) => walk_parent_element(el),
                     // if this is the first node and not an element, we need to get the parent from the target node
-                    None => target.parent_element(),
+                    None => walk_parent_element(target),
                 };
                 match parent {
                     Some(parent) => current_target_element = Some(parent),

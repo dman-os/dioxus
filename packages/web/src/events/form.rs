@@ -74,8 +74,7 @@ impl HasFormData for WebFormData {
     }
 
     fn valid(&self) -> bool {
-        self.event
-            .target()
+        super::event_origin(&self.event)
             .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
             .map(|input| input.check_validity())
             .unwrap_or(true)
@@ -85,8 +84,7 @@ impl HasFormData for WebFormData {
 impl HasFileData for WebFormData {
     fn files(&self) -> Vec<FileData> {
         use wasm_bindgen::JsCast;
-        self.event
-            .target()
+        super::event_origin(&self.event)
             .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
             .and_then(|input| input.files())
             .map(crate::files::WebFileEngine::new)

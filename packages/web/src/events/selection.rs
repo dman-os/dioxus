@@ -44,7 +44,7 @@ impl WebEventExt for dioxus_html::SelectionData {
 }
 
 fn with_text_control<T>(event: &Event, f: impl FnOnce(TextControl<'_>) -> T) -> Option<T> {
-    event.target().and_then(|target| {
+    super::event_origin(event).and_then(|target| {
         if let Some(input) = target.dyn_ref::<HtmlInputElement>() {
             Some(f(TextControl::Input(input)))
         } else {

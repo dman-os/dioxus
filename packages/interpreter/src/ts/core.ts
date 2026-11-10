@@ -5,6 +5,32 @@ import { setAttributeInner } from "./set_attribute";
 
 export type NodeId = number;
 
+// Attribute set by the renderer on an element that must own a shadow root.
+export const SHADOW_ATTRIBUTE = "data-dioxus-shadow";
+
+// The node that holds `node`'s children: its shadow root when it has one,
+// otherwise `node` itself.
+export function childContainer(node: Node): Node {
+  return (node as Element).shadowRoot ?? node;
+}
+
+// The first event target of `event`, looking through shadow boundaries.
+// A listener outside a shadow tree sees `event.target` retargeted to the
+// shadow host, but `composedPath()[0]` is the node the event started at
+// (open roots only). `composedPath()` is empty once dispatch finished, hence
+// the fallback.
+export function eventOrigin(event: Event): EventTarget | null {
+  return event.composedPath()[0] ?? event.target;
+}
+
+// The parent used when walking from a node towards the root: a shadow root's
+// parent is its host, so the walk crosses shadow boundaries.
+export function walkParent(node: Node): Node | null {
+  const parent = node.parentNode;
+  if (parent instanceof ShadowRoot) return parent.host;
+  return parent;
+}
+
 // Element decorated with the listener bookkeeping properties that the
 // interpreter attaches at runtime.
 interface ListenerElement extends Element {
@@ -221,7 +247,7 @@ export class BaseInterpreter {
   }
 
   child(index: number) {
-    const parent = this.stack[this.stack.length - 1][0];
+    const parent = childContainer(this.stack[this.stack.length - 1][0]);
     const child = parent.childNodes[index];
     if (!child) throw new Error("child: index out of bounds");
     this.stack[this.stack.length - 1] = [child, null];
@@ -244,12 +270,55 @@ export class BaseInterpreter {
 
   cloneTop() {
     const node = this.stack[this.stack.length - 1][0];
-    this.stack[this.stack.length - 1] = [node.cloneNode(true), null];
+    this.stack[this.stack.length - 1] = [this.cloneDeep(node), null];
+  }
+
+  // `cloneNode(true)` copies light children only, which would leave a cloned
+  // shadow host with an empty shadow root (or none at all). Templates whose
+  // subtree contains a shadow host are cloned by hand; others take the native
+  // fast path.
+  cloneDeep(node: Node): Node {
+    if (
+      !(node instanceof Element) ||
+      !(node.shadowRoot || node.querySelector(`[${SHADOW_ATTRIBUTE}]`))
+    ) {
+      return node.cloneNode(true);
+    }
+    const copy = node.cloneNode(false) as Element;
+    const into = copy.hasAttribute(SHADOW_ATTRIBUTE)
+      ? this.ensureShadowRoot(copy)
+      : copy;
+    for (const child of childContainer(node).childNodes) {
+      into.appendChild(this.cloneDeep(child));
+    }
+    return copy;
+  }
+
+  // Give `node` its shadow root if it is marked with `data-dioxus-shadow`.
+  //
+  // The mark is a plain attribute: the renderer emits it as a SetAttribute
+  // after CreateElement, so the element does not yet carry it when it is
+  // created, and children arrive after it in the same batch. We therefore
+  // attach when the attribute is set (see `setAttributeInner`) and again,
+  // idempotently, when children are inserted. If children landed first, they
+  // are moved into the shadow root so that the light DOM of a host is always
+  // empty. The mode is "open" because the event path (`composedPath`) of
+  // closed roots is hidden from the root listener.
+  ensureShadowRoot(node: Node): Node {
+    const element = node as Element;
+    if (element.shadowRoot) return element.shadowRoot;
+    if (!element.hasAttribute?.(SHADOW_ATTRIBUTE)) return node;
+    const shadow = element.attachShadow({ mode: "open" });
+    shadow.append(...Array.from(element.childNodes));
+    return shadow;
   }
 
   appendChildrenToTop(many: number) {
     const parentIdx = this.stack.length - many - 1;
-    const parent = this.stack[parentIdx][0];
+    // children of a shadow host live in its shadow root. Every other
+    // insertion path (insertAfter/Before, replaceWith) takes `parentNode` of
+    // an anchor, which is the ShadowRoot itself for nodes inside one.
+    const parent = this.ensureShadowRoot(this.stack[parentIdx][0]);
     const items = this.stack.splice(parentIdx + 1, many);
     this.applyChunk(items, parent, null);
   }
@@ -384,5 +453,6 @@ export class BaseInterpreter {
     ns: string | null,
   ) {
     setAttributeInner(node as HTMLElement, field, value, ns ?? "");
+    if (field === SHADOW_ATTRIBUTE && !ns) this.ensureShadowRoot(node);
   }
 }

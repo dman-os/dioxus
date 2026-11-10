@@ -34,6 +34,21 @@ mod transition;
 mod visible;
 mod wheel;
 
+/// The node the event started at, looking through shadow roots.
+///
+/// For an event that bubbled out of a shadow tree to a listener outside of it,
+/// `Event::target` is the shadow host; the first entry of `composedPath()` is
+/// the real origin (for open roots). The path is empty once dispatch has
+/// finished, in which case this is `target()`.
+pub(crate) fn event_origin(event: &Event) -> Option<web_sys::EventTarget> {
+    event
+        .composed_path()
+        .get(0)
+        .dyn_into::<web_sys::EventTarget>()
+        .ok()
+        .or_else(|| event.target())
+}
+
 /// A wrapper for the websys event that allows us to give it the impls from dioxus-html
 pub(crate) struct Synthetic<T: 'static> {
     /// The inner web sys event that the synthetic event wraps

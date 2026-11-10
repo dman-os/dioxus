@@ -1,0 +1,88 @@
+<!doctype html>
+<!-- Browser harness for `data-dioxus-shadow`. Serve `packages/interpreter/` over HTTP
+     and open /tests/shadow_roots/index.html in a real engine (see run.sh). The
+     page drives the generated core.js/native.js with hand-written edits and
+     writes PASS/FAIL lines into <pre id="out">. -->
+<meta charset="utf-8" />
+<div id="root"></div>
+<pre id="out"></pre>
+<script type="module">
+  const lines = [];
+  const check = (name, ok, detail = "") => lines.push(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " :: " + detail : ""}`);
+  try {
+    const core = await import("/src/js/core.js");
+    // native.js extends whatever the host bound to `RawInterpreter`.
+    globalThis.RawInterpreter = core.BaseInterpreter;
+    const { NativeInterpreter } = await import("/src/js/native.js");
+
+    const root = document.getElementById("root");
+    const it = new NativeInterpreter("", true);
+    const seen = [];
+    it.liveview = false;
+    it.intercept_link_redirects = false;
+    it.sendSerializedEvent = (body) => { seen.push(`${body.name}:${body.element}`); };
+    core.BaseInterpreter.prototype.initialize.call(it, root, (e) => it.handleEvent(e, e.type, e.bubbles));
+
+    // plain (light DOM) button, id 5
+    it.createElementTop("button"); it.setId(5); it.addTopEventListener("click", true);
+    it.appendChildrenToTop(1);
+
+    // shadow host (id 1) with listener-carrying button (id 2); the attribute
+    // arrives after CreateElement, children are appended afterwards.
+    it.createElementTop("div"); it.setId(1);
+    it.setTopAttribute("data-dioxus-shadow", "", null);
+    it.addTopEventListener("focus", false); // non-bubbling listener on the host itself
+    it.createElementTop("button"); it.setId(2); it.addTopEventListener("click", true);
+    it.appendChildrenToTop(1);
+    it.appendChildrenToTop(1); // host -> root (stack is [root, host])
+
+    const host = it.getNode(1), inner = it.getNode(2), plain = it.getNode(5);
+    check("host has an open shadow root", !!host.shadowRoot && host.shadowRoot.mode === "open");
+    check("children landed in shadow root, light DOM empty", host.shadowRoot.contains(inner) && host.childNodes.length === 0);
+
+    inner.click();
+    check("click inside shadow reaches handler with inner id", seen.at(-1) === "click:2", seen.join(","));
+    plain.click();
+    check("click outside any shadow root unchanged", seen.at(-1) === "click:5", seen.join(","));
+
+    // click on a deeper un-id'd node inside the shadow tree resolves up to inner (id 2)
+    it.pushId(2); it.createElementTop("span"); it.setId(3); it.appendChildrenToTop(1); it.pop();
+    it.getNode(3).dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    check("walk from un-id'd shadow descendant crosses to nearest id", seen.at(-1) === "click:2", seen.join(","));
+
+    // insertAfter / insertBefore / replaceWith with an anchor inside the shadow root
+    it.pushId(2); it.createElementTop("b"); it.setId(6); it.insertAfterTop(1);
+    it.pushId(2); it.createElementTop("i"); it.setId(7); it.insertBeforeTop(1);
+    const order = [...host.shadowRoot.children].map((n) => n.tagName);
+    check("insertAfter/insertBefore with shadow anchor", order.join() === "I,BUTTON,B" && host.childNodes.length === 0, order.join());
+    it.pushId(6); it.createElementTop("u"); it.setId(8); it.replaceTopWith(1);
+    check("replaceWith with shadow anchor", [...host.shadowRoot.children].map((n) => n.tagName).join() === "I,BUTTON,U");
+
+    // child(index) addresses the shadow root's children (hydration / template walks)
+    it.pushId(1); it.child(0); const c0 = it.stack.at(-1)[0]; it.pop();
+    check("child(0) of host is shadow child 0", c0 === host.shadowRoot.firstChild);
+
+    // non-bubbling listener on the host: event from inside is retargeted to host, keep host id
+    inner.dispatchEvent(new FocusEvent("focus", { composed: true }));
+    check("non-bubbling host listener keeps host id", seen.at(-1) === "focus:1", seen.join(","));
+
+    // template cloning: a shadow host with a child cloned via cloneTop must keep its shadow content
+    it.createElementTop("section");
+    it.setTopAttribute("data-dioxus-shadow", "", null);
+    it.createElementTop("p"); it.appendChildrenToTop(1);
+    it.cloneTop();
+    const clone = it.stack.at(-1)[0];
+    check("cloneTop preserves shadow host content", !!clone.shadowRoot && clone.shadowRoot.firstChild?.tagName === "P" && clone.childNodes.length === 0);
+    it.pop();
+
+    // attribute set after children (reverse order) migrates children into the shadow root
+    it.createElementTop("div"); it.createElementTop("p"); it.appendChildrenToTop(1);
+    it.setTopAttribute("data-dioxus-shadow", "", null);
+    const late = it.stack.at(-1)[0];
+    check("late attribute moves existing children into shadow root", late.shadowRoot?.firstChild?.tagName === "P" && late.childNodes.length === 0);
+    it.pop();
+  } catch (e) {
+    check("harness ran without throwing", false, String(e && e.stack || e));
+  }
+  document.getElementById("out").textContent = lines.join("\n") + `\nDONE ${lines.some((l) => l.startsWith("FAIL")) ? "FAILED" : "OK"}`;
+</script>

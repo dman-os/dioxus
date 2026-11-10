@@ -44,6 +44,7 @@ wasm-streams = "0.5.0"
 [dependencies.web-sys]
 workspace = true
 features = [
+    "ShadowRoot",
     "AnimationEvent",
     "ClipboardEvent",
     "CloseEvent",

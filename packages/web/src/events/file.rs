@@ -8,7 +8,7 @@ use super::Synthetic;
 impl HasFileData for Synthetic<web_sys::Event> {
     fn files(&self) -> Vec<FileData> {
         use wasm_bindgen::JsCast;
-        let target = self.event.target();
+        let target = super::event_origin(&self.event);
 
         if let Some(target) = target
             .clone()

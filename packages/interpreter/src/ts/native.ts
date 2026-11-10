@@ -3,7 +3,7 @@
 // This file lives on the renderer, not the host. It's basically a polyfill over functionality that the host can't
 // provide since it doesn't have access to the dom.
 
-import { BaseInterpreter, NodeId } from "./core";
+import { BaseInterpreter, NodeId, eventOrigin, walkParent } from "./core";
 import { SerializedEvent, serializeEvent, SerializedFileData, extractSerializedFormValues, SerializedFormObject } from "./serialize";
 
 // okay so, we've got this JSChannel thing from sledgehammer, implicitly imported into our scope
@@ -73,7 +73,7 @@ export class NativeInterpreter extends JSChannel_ {
 
     // attach a listener to the route that listens for clicks and prevents the default file dialog
     window.addEventListener("click", (event) => {
-      const target = event.target;
+      const target = eventOrigin(event);
       if (
         target instanceof HTMLInputElement &&
         target.getAttribute("type") === "file"
@@ -326,7 +326,12 @@ export class NativeInterpreter extends JSChannel_ {
   }
 
   handleEvent(event: Event, name: string, bubbles: boolean) {
-    const target = event.target!;
+    // Non-bubbling listeners sit on the element itself, so `event.target` is
+    // already the right node (a composed event from inside a shadow tree
+    // retargets to the host there, which is the element that listens).
+    // Bubbling events arrive at the root listener and must see through shadow
+    // boundaries.
+    const target = (bubbles ? eventOrigin(event) : event.target)!;
     const element = getTargetId(target)!;
     const contents = serializeEvent(event, target);
 
@@ -583,7 +588,7 @@ function getTargetId(target: EventTarget): NodeId | null {
       realId = ourTarget.getAttribute(`data-dioxus-id`);
     }
 
-    ourTarget = ourTarget.parentNode;
+    ourTarget = walkParent(ourTarget);
   }
 
   return parseInt(realId);

@@ -197,8 +197,7 @@ function serializeInputEvent(
     contents.valid = values.valid;
   }
 
-  if (event.target instanceof HTMLInputElement) {
-    let target = event.target;
+  if (target instanceof HTMLInputElement) {
     let value = target.value ?? target.textContent ?? "";
 
     if (target.type === "checkbox") {
@@ -210,12 +209,12 @@ function serializeInputEvent(
     contents.value = value;
   }
 
-  if (event.target instanceof HTMLTextAreaElement) {
-    contents.value = event.target.value;
+  if (target instanceof HTMLTextAreaElement) {
+    contents.value = target.value;
   }
 
-  if (event.target instanceof HTMLSelectElement) {
-    contents.value = retrieveSelectValue(event.target).join(",");
+  if (target instanceof HTMLSelectElement) {
+    contents.value = retrieveSelectValue(target).join(",");
   }
 
   // Contenteditable / generic targets: mirror the wasm renderer, which falls
@@ -223,8 +222,8 @@ function serializeInputEvent(
   // (see packages/web/src/events/before_input.rs WebBeforeInputData::value
   // and packages/web/src/events/form.rs WebFormData::value).
   if (contents.value === undefined) {
-    if (event.target instanceof HTMLElement) {
-      contents.value = event.target.textContent ?? "";
+    if (target instanceof HTMLElement) {
+      contents.value = target.textContent ?? "";
     } else {
       contents.value = "";
     }

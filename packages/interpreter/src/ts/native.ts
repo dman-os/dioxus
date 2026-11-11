@@ -263,16 +263,20 @@ export class NativeInterpreter extends JSChannel_ {
     }
   }
 
-  setFocus(id: NodeId, focus: boolean) {
+  // Desktop's `set_focus` awaits a boolean from this call (like `scrollTo`), so it answers
+  // whether the node could take or drop focus; returning nothing made every call fail to
+  // deserialize `null`.
+  setFocus(id: NodeId, focus: boolean): boolean {
     const node = this.nodes[id];
-
     if (node instanceof HTMLElement) {
       if (focus) {
         node.focus();
       } else {
         node.blur();
       }
+      return true;
     }
+    return false;
   }
 
   // Windows drag-n-drop fix code. Called by wry drag-n-drop handler over the event loop.

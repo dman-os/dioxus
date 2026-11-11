@@ -3,8 +3,31 @@
 // This file lives on the renderer, not the host. It's basically a polyfill over functionality that the host can't
 // provide since it doesn't have access to the dom.
 
-import { BaseInterpreter, NodeId, eventOrigin, walkParent } from "./core";
+import { BaseInterpreter, NodeId } from "./core";
 import { SerializedEvent, serializeEvent, SerializedFileData, extractSerializedFormValues, SerializedFormObject } from "./serialize";
+
+// These live here and not in core.ts on purpose: desktop and liveview paste the
+// sledgehammer JS (which inlines core.js) and native.js into one module script,
+// so a function exported by core.ts and imported here is bundled into both and
+// the duplicate top-level declaration is a SyntaxError that blanks the window.
+// native.ts may only import types (and unused values) from core.ts.
+
+// The first event target of `event`, looking through shadow boundaries.
+// A listener outside a shadow tree sees `event.target` retargeted to the
+// shadow host, but `composedPath()[0]` is the node the event started at
+// (open roots only). `composedPath()` is empty once dispatch finished, hence
+// the fallback.
+function eventOrigin(event: Event): EventTarget | null {
+  return event.composedPath()[0] ?? event.target;
+}
+
+// The parent used when walking from a node towards the root: a shadow root's
+// parent is its host, so the walk crosses shadow boundaries.
+function walkParent(node: Node): Node | null {
+  const parent = node.parentNode;
+  if (parent instanceof ShadowRoot) return parent.host;
+  return parent;
+}
 
 // okay so, we've got this JSChannel thing from sledgehammer, implicitly imported into our scope
 // we want to extend it, and it technically extends base interpreter. To make typescript happy,

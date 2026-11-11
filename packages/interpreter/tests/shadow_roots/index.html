@@ -10,10 +10,41 @@
   const lines = [];
   const check = (name, ok, detail = "") => lines.push(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " :: " + detail : ""}`);
   try {
-    const core = await import("/src/js/core.js");
-    // native.js extends whatever the host bound to `RawInterpreter`.
-    globalThis.RawInterpreter = core.BaseInterpreter;
-    const { NativeInterpreter } = await import("/src/js/native.js");
+    // `?mode=desktop` loads the bundles the way wry does: desktop's `module_loader`
+    // pastes the sledgehammer JS (which inlines core.js) and native.js into ONE
+    // module script, so the two bundles must not declare the same top-level name
+    // (a duplicate declaration is a SyntaxError that blanks the whole window).
+    // Default mode imports each bundle as its own module.
+    let core, NativeInterpreter;
+    if (new URLSearchParams(location.search).get("mode") === "desktop") {
+      const [coreJs, nativeJs] = await Promise.all(
+        ["/src/js/core.js", "/src/js/native.js"].map((u) => fetch(u).then((r) => r.text())),
+      );
+      const stripExports = (js) => js.replace(/export\s*\{[^}]*\}\s*;?\s*$/, "");
+      const source = [
+        stripExports(coreJs),
+        "class RawInterpreter extends BaseInterpreter {}", // the class sledgehammer generates; native.js binds it as JSChannel_
+        stripExports(nativeJs),
+        "window.__bundles = { BaseInterpreter, NativeInterpreter };",
+      ].join("\n");
+      const loaded = new Promise((resolve, reject) => {
+        addEventListener("error", (e) => reject(new Error(`${e.message} (line ${e.lineno})`)), { once: true });
+        const script = document.createElement("script");
+        script.type = "module";
+        script.textContent = source + "\nwindow.__bundlesLoaded();";
+        window.__bundlesLoaded = resolve;
+        document.head.append(script);
+      });
+      await loaded;
+      core = window.__bundles;
+      ({ NativeInterpreter } = window.__bundles);
+      globalThis.RawInterpreter = core.BaseInterpreter;
+    } else {
+      core = await import("/src/js/core.js");
+      // native.js extends whatever the host bound to `RawInterpreter`.
+      globalThis.RawInterpreter = core.BaseInterpreter;
+      ({ NativeInterpreter } = await import("/src/js/native.js"));
+    }
 
     const root = document.getElementById("root");
     const it = new NativeInterpreter("", true);

@@ -14,23 +14,6 @@ export function childContainer(node: Node): Node {
   return (node as Element).shadowRoot ?? node;
 }
 
-// The first event target of `event`, looking through shadow boundaries.
-// A listener outside a shadow tree sees `event.target` retargeted to the
-// shadow host, but `composedPath()[0]` is the node the event started at
-// (open roots only). `composedPath()` is empty once dispatch finished, hence
-// the fallback.
-export function eventOrigin(event: Event): EventTarget | null {
-  return event.composedPath()[0] ?? event.target;
-}
-
-// The parent used when walking from a node towards the root: a shadow root's
-// parent is its host, so the walk crosses shadow boundaries.
-export function walkParent(node: Node): Node | null {
-  const parent = node.parentNode;
-  if (parent instanceof ShadowRoot) return parent.host;
-  return parent;
-}
-
 // Element decorated with the listener bookkeeping properties that the
 // interpreter attaches at runtime.
 interface ListenerElement extends Element {

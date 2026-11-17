@@ -1,0 +1,137 @@
+<!doctype html>
+<!-- Browser harness for `data-dioxus-scroll-proxy`. Serve `packages/interpreter/` over HTTP and open
+     /tests/scroll_proxy/index.html in a real engine (see run.sh), or by hand: the page scrolls the
+     document and writes PASS/FAIL lines into <pre id="out"> (a human can also scroll it and watch
+     <pre id="live">). `?mode=desktop` loads the bundles the way wry does (one module script). -->
+<meta charset="utf-8" />
+<style>
+  body { margin: 0; }
+  #spacer { height: 3000px; background: linear-gradient(#eee, #999); }
+  #plain { height: 100px; overflow: auto; }
+  #plain > div { height: 400px; }
+  pre { position: fixed; right: 0; top: 0; margin: 0; background: #fff8; }
+</style>
+<div id="root"></div>
+<pre id="live"></pre>
+<pre id="out" style="position:static;"></pre>
+<script type="module">
+  const lines = [];
+  const check = (name, ok, detail = "") => lines.push(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " :: " + detail : ""}`);
+  const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const until = async (what, predicate) => {
+    for (let i = 0; i < 100 && !predicate(); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+    if (!predicate()) throw new Error(`timed out waiting for ${what}`);
+  };
+  try {
+    let core, NativeInterpreter;
+    if (new URLSearchParams(location.search).get("mode") === "desktop") {
+      const [coreJs, nativeJs] = await Promise.all(
+        ["/src/js/core.js", "/src/js/native.js"].map((u) => fetch(u).then((r) => r.text())),
+      );
+      const stripExports = (js) => js.replace(/export\s*\{[^}]*\}\s*;?\s*$/, "");
+      const source = [
+        stripExports(coreJs),
+        "class RawInterpreter extends BaseInterpreter {}",
+        stripExports(nativeJs),
+        "window.__bundles = { BaseInterpreter, NativeInterpreter };",
+      ].join("\n");
+      const loaded = new Promise((resolve, reject) => {
+        addEventListener("error", (e) => reject(new Error(`${e.message} (line ${e.lineno})`)), { once: true });
+        const script = document.createElement("script");
+        script.type = "module";
+        script.textContent = source + "\nwindow.__bundlesLoaded();";
+        window.__bundlesLoaded = resolve;
+        document.head.append(script);
+      });
+      await loaded;
+      core = window.__bundles;
+      ({ NativeInterpreter } = window.__bundles);
+      globalThis.RawInterpreter = core.BaseInterpreter;
+    } else {
+      core = await import("/src/js/core.js");
+      globalThis.RawInterpreter = core.BaseInterpreter;
+      ({ NativeInterpreter } = await import("/src/js/native.js"));
+    }
+
+    const root = document.getElementById("root");
+    const it = new NativeInterpreter("", true);
+    const seen = [];
+    it.liveview = false;
+    it.intercept_link_redirects = false;
+    it.sendSerializedEvent = (body) => {
+      seen.push(body);
+      document.getElementById("live").textContent = `${body.name}:${body.element} top=${body.data.scroll_top ?? ""} client=${body.data.client_width ?? ""}x${body.data.client_height ?? ""}`;
+    };
+    core.BaseInterpreter.prototype.initialize.call(it, root, (e) => it.handleEvent(e, e.type, e.bubbles));
+    const last = (name, element) => seen.findLast((b) => b.name === name && b.element === element);
+    const count = (name, element) => seen.filter((b) => b.name === name && b.element === element).length;
+
+    // content that makes the document scroll
+    root.before(Object.assign(document.createElement("div"), { id: "spacer" }));
+    document.body.append(root);
+    document.body.append(document.getElementById("spacer"));
+
+    // proxy, id 1: attribute first, then listeners (a template's static attribute)
+    it.createElementTop("div"); it.setId(1);
+    it.setTopAttribute("data-dioxus-scroll-proxy", "document", null);
+    it.addTopEventListener("scroll", false);
+    it.addTopEventListener("resize", false);
+    it.appendChildrenToTop(1);
+    // proxy, id 2: listeners first, attribute after (a dynamic attribute may arrive in either order)
+    it.createElementTop("div"); it.setId(2);
+    it.addTopEventListener("scroll", false);
+    it.addTopEventListener("resize", false);
+    it.setTopAttribute("data-dioxus-scroll-proxy", "document", null);
+    it.appendChildrenToTop(1);
+    // an ordinary scroller, id 3, must keep reporting its own scroll
+    it.createElementTop("div"); it.setId(3);
+    it.setTopAttribute("id", "plain", null);
+    it.addTopEventListener("scroll", false);
+    it.createElementTop("div"); it.appendChildrenToTop(1);
+    it.appendChildrenToTop(1);
+
+    const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+    check("the document scrolls (harness sanity)", document.documentElement.scrollHeight > vh * 2);
+
+    // resize: both proxies get the viewport's size, delivered as a ResizeObserverEntry
+    await until("initial resize of both proxies", () => last("resize", 1) && last("resize", 2));
+    const sized = last("resize", 1).data;
+    check("resize reports the viewport's size", sized.border_box_size.join() === `${vw},${vh}` && sized.content_box_size.join() === `${vw},${vh}`, JSON.stringify(sized).slice(0, 200));
+
+    // scroll: the window's scroll reaches both proxies, with the document scroller's data
+    window.scrollTo(0, 321);
+    await until("scroll events", () => last("scroll", 1) && last("scroll", 2));
+    for (const id of [1, 2]) {
+      const d = last("scroll", id).data;
+      check(`proxy ${id}: scroll data is the document's`,
+        d.scroll_top === 321 && d.scroll_height === document.documentElement.scrollHeight
+        && d.client_height === vh && d.client_width === vw, JSON.stringify(d));
+    }
+    check("the ordinary scroller got no document scroll", count("scroll", 3) === 0);
+    const plain = it.getNode(3);
+    plain.scrollTop = 40;
+    await until("the plain scroller's own scroll", () => last("scroll", 3));
+    check("an ordinary scroller still reports its own scroll", last("scroll", 3).data.scroll_top === 40 && last("scroll", 3).data.client_height === 100, JSON.stringify(last("scroll", 3).data));
+
+    // mounted commands act on the document scroller
+    check("getScrollTop is the document's", it.getScrollTop(1) === 321, String(it.getScrollTop(1)));
+    check("getScrollHeight is the document's", it.getScrollHeight(1) === document.documentElement.scrollHeight);
+    check("getScrollLeft/Width are the document's", it.getScrollLeft(1) === 0 && it.getScrollWidth(1) === document.documentElement.scrollWidth);
+    check("scroll() moves the document", it.scroll(1, 0, 700, "instant") === true && Math.round(window.scrollY) === 700, String(window.scrollY));
+    const rect = it.getClientRect(1);
+    check("getClientRect is the viewport", rect.origin.join() === "0,0" && rect.size.join() === `${vw},${vh}`, JSON.stringify(rect));
+    check("an ordinary element's getClientRect is its own box", it.getClientRect(3).size[1] === 100);
+
+    // teardown: removing every proxy drops the window listener and the sentinel
+    const sentinels = () => [...document.body.children].filter((n) => n.style.position === "fixed").length;
+    check("one sentinel while proxies exist", sentinels() === 1 && it.scrollProxies.size === 2, `${sentinels()} ${it.scrollProxies.size}`);
+    it.pushId(1); it.removeTop();
+    it.pushId(2); it.removeTop();
+    window.scrollTo(0, 100);
+    await nextFrame(); await nextFrame();
+    check("no sentinel and no window listener once the proxies are gone", sentinels() === 0 && it.viewportScrollHandler === undefined && it.scrollProxies.size === 0, `${sentinels()}`);
+  } catch (e) {
+    check("harness ran without throwing", false, String(e && e.stack || e));
+  }
+  document.getElementById("out").textContent = lines.join("\n") + `\nDONE ${lines.some((l) => l.startsWith("FAIL")) ? "FAILED" : "OK"}`;
+</script>

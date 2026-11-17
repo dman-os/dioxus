@@ -404,6 +404,16 @@ function serializeDragEvent(event: DragEvent): SerializedEvent {
   };
 }
 
+// The element whose scroll `element` reports and drives: the document's scroller for an element
+// marked `data-dioxus-scroll-proxy` (see core.ts), the element itself otherwise. The attribute
+// name is spelled out because native.js and core.js share one module scope on desktop, so they
+// cannot declare the same top-level names.
+export function scrollerOf(element: Element): Element {
+  return element.hasAttribute("data-dioxus-scroll-proxy")
+    ? document.scrollingElement ?? document.documentElement
+    : element;
+}
+
 function serializeScrollEvent(event: Event): SerializedEvent {
   let scrollLeft = 0;
   let scrollTop = 0;
@@ -413,12 +423,13 @@ function serializeScrollEvent(event: Event): SerializedEvent {
   let clientHeight = 0;
 
   if (event.target instanceof Element) {
-    scrollLeft = event.target.scrollLeft;
-    scrollTop = event.target.scrollTop;
-    scrollWidth = event.target.scrollWidth;
-    scrollHeight = event.target.scrollHeight;
-    clientWidth = event.target.clientWidth;
-    clientHeight = event.target.clientHeight;
+    const scroller = scrollerOf(event.target);
+    scrollLeft = scroller.scrollLeft;
+    scrollTop = scroller.scrollTop;
+    scrollWidth = scroller.scrollWidth;
+    scrollHeight = scroller.scrollHeight;
+    clientWidth = scroller.clientWidth;
+    clientHeight = scroller.clientHeight;
   } else if (event.target === document) {
     scrollLeft = window.scrollX || document.documentElement.scrollLeft;
     scrollTop = window.scrollY || document.documentElement.scrollTop;

@@ -6,6 +6,24 @@ use wasm_bindgen::JsCast;
 
 use super::{Synthetic, WebEventExt};
 
+/// Marks an element as standing in for the document's scroller; the interpreter
+/// (`SCROLL_PROXY_ATTRIBUTE` in core.ts) feeds its scroll and resize listeners from the window.
+const SCROLL_PROXY_ATTRIBUTE: &str = "data-dioxus-scroll-proxy";
+
+/// The element whose scroll `element` reports and drives: the document's scroller for a scroll
+/// proxy, `element` itself otherwise.
+pub(super) fn scroller_of(element: &web_sys::Element) -> web_sys::Element {
+    if element.has_attribute(SCROLL_PROXY_ATTRIBUTE) {
+        element
+            .owner_document()
+            .expect("an element in a document has an owner document")
+            .scrolling_element()
+            .expect("a document has a scrolling element")
+    } else {
+        element.clone()
+    }
+}
+
 impl dioxus_html::RenderedElementBacking for Synthetic<web_sys::Element> {
     fn get_scroll_offset(
         &self,
@@ -16,8 +34,9 @@ impl dioxus_html::RenderedElementBacking for Synthetic<web_sys::Element> {
                 >,
         >,
     > {
-        let left = self.event.scroll_left();
-        let top = self.event.scroll_top();
+        let scroller = scroller_of(&self.event);
+        let left = scroller.scroll_left();
+        let top = scroller.scroll_top();
         let result = Ok(dioxus_html::geometry::PixelsVector2D::new(
             left as f64,
             top as f64,
@@ -34,8 +53,9 @@ impl dioxus_html::RenderedElementBacking for Synthetic<web_sys::Element> {
                 >,
         >,
     > {
-        let width = self.event.scroll_width();
-        let height = self.event.scroll_height();
+        let scroller = scroller_of(&self.event);
+        let width = scroller.scroll_width();
+        let height = scroller.scroll_height();
         let result = Ok(dioxus_html::geometry::PixelsSize::new(
             width as f64,
             height as f64,
@@ -52,11 +72,21 @@ impl dioxus_html::RenderedElementBacking for Synthetic<web_sys::Element> {
                 >,
         >,
     > {
-        let rect = self.event.get_bounding_client_rect();
-        let result = Ok(dioxus_html::geometry::PixelsRect::new(
-            Point2D::new(rect.left(), rect.top()),
-            Size2D::new(rect.width(), rect.height()),
-        ));
+        // A scroll proxy's box is the viewport, the document scroller's visible rectangle.
+        let (origin, size) = if self.event.has_attribute(SCROLL_PROXY_ATTRIBUTE) {
+            let root = scroller_of(&self.event);
+            (
+                Point2D::new(0.0, 0.0),
+                Size2D::new(root.client_width() as f64, root.client_height() as f64),
+            )
+        } else {
+            let rect = self.event.get_bounding_client_rect();
+            (
+                Point2D::new(rect.left(), rect.top()),
+                Size2D::new(rect.width(), rect.height()),
+            )
+        };
+        let result = Ok(dioxus_html::geometry::PixelsRect::new(origin, size));
         Box::pin(async { result })
     }
 
@@ -107,7 +137,7 @@ impl dioxus_html::RenderedElementBacking for Synthetic<web_sys::Element> {
                 options.set_behavior(web_sys::ScrollBehavior::Smooth);
             }
         }
-        self.event.scroll_with_scroll_to_options(&options);
+        scroller_of(&self.event).scroll_with_scroll_to_options(&options);
 
         Box::pin(async { Ok(()) })
     }

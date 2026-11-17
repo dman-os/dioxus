@@ -8,6 +8,20 @@ export type NodeId = number;
 // Attribute set by the renderer on an element that must own a shadow root.
 export const SHADOW_ATTRIBUTE = "data-dioxus-shadow";
 
+// Attribute that makes an element stand in for the document's scroller: `data-dioxus-scroll-proxy`
+// = "document". Standard Dioxus can only observe and drive an element's scroll, but some UI must
+// scroll the document itself (a nested `overflow: auto` element gets no momentum scrolling in
+// some engines, WebKitGTK among them). On a proxy element:
+//   - `scroll`/`scrollend` listeners receive the window's scroll, and the event data (see
+//     `serializeScrollEvent`) is read from `document.scrollingElement`;
+//   - `resize` listeners receive the viewport's size, observed on a fixed full-viewport
+//     sentinel, so the entry's boxes are the viewport's (what the document scroller's
+//     client box is);
+//   - the mounted scroll commands (`native.ts`) act on the document scroller.
+// The proxy element itself needs no scroll or size of its own.
+export const SCROLL_PROXY_ATTRIBUTE = "data-dioxus-scroll-proxy";
+const VIEWPORT_SCROLL_EVENTS = ["scroll", "scrollend"];
+
 // Host styles in shadow roots.
 //
 // A shadow root hides the document's stylesheets from its subtree, so a micro that styles itself
@@ -137,6 +151,13 @@ export class BaseInterpreter {
   resizeObserver: ResizeObserver;
   intersectionObserver: IntersectionObserver;
 
+  // Elements marked `SCROLL_PROXY_ATTRIBUTE` that have a listener, fed by the window's scroll and
+  // the viewport sentinel's size. The window listener and the sentinel exist only while this is
+  // non-empty.
+  scrollProxies: Set<Element>;
+  viewportSentinel: HTMLElement | undefined;
+  viewportScrollHandler: EventListener | undefined;
+
   nodes: Node[];
   stack: StackEntry[];
 
@@ -148,6 +169,7 @@ export class BaseInterpreter {
   initialize(root: HTMLElement, handler: EventListener | null = null) {
     this.global = {};
     this.local = {};
+    this.scrollProxies = new Set();
     this.root = root;
 
     this.nodes = [root];
@@ -160,14 +182,70 @@ export class BaseInterpreter {
   }
 
   handleResizeEvent(entry: ResizeObserverEntry) {
-    const target = entry.target;
+    // The sentinel's size is the viewport's: every proxy receives it as its own.
+    const targets =
+      entry.target === this.viewportSentinel
+        ? this.liveScrollProxies()
+        : [entry.target];
 
-    let event = new CustomEvent<ResizeObserverEntry>("resize", {
-      bubbles: false,
-      detail: entry,
-    });
+    for (const target of targets) {
+      target.dispatchEvent(
+        new CustomEvent<ResizeObserverEntry>("resize", {
+          bubbles: false,
+          detail: entry,
+        }),
+      );
+    }
+  }
 
-    target.dispatchEvent(event);
+  // The registered proxies still in the document. A removed element's listeners are dropped with
+  // it, but a subtree removed under it never reports each node, so disconnection is the signal.
+  liveScrollProxies(): Element[] {
+    for (const proxy of this.scrollProxies) {
+      if (!proxy.isConnected) this.scrollProxies.delete(proxy);
+    }
+    if (this.scrollProxies.size === 0) this.stopViewportWatch();
+    return Array.from(this.scrollProxies);
+  }
+
+  registerScrollProxy(element: Element) {
+    if (this.scrollProxies.has(element)) return;
+    this.scrollProxies.add(element);
+    if (this.viewportScrollHandler) return;
+    this.viewportScrollHandler = (event) => {
+      for (const proxy of this.liveScrollProxies()) {
+        proxy.dispatchEvent(new Event(event.type, { bubbles: false }));
+      }
+    };
+    for (const name of VIEWPORT_SCROLL_EVENTS) {
+      window.addEventListener(name, this.viewportScrollHandler, {
+        passive: true,
+      });
+    }
+    // `position: fixed` with every inset 0 spans the viewport less its scrollbars, which is the
+    // document scroller's client box.
+    const sentinel = document.createElement("div");
+    sentinel.setAttribute("aria-hidden", "true");
+    sentinel.style.cssText =
+      "position:fixed;inset:0;visibility:hidden;pointer-events:none;";
+    document.body.append(sentinel);
+    this.viewportSentinel = sentinel;
+    this.observeViewport();
+  }
+
+  // Observing delivers an initial entry, so a proxy gets its size once it listens, however late.
+  observeViewport() {
+    this.createResizeObserver(this.viewportSentinel!);
+  }
+
+  stopViewportWatch() {
+    for (const name of VIEWPORT_SCROLL_EVENTS) {
+      window.removeEventListener(name, this.viewportScrollHandler!);
+    }
+    this.viewportScrollHandler = undefined;
+    this.resizeObserver.unobserve(this.viewportSentinel!);
+    this.viewportSentinel!.remove();
+    this.viewportSentinel = undefined;
   }
 
   createResizeObserver(element: Element) {
@@ -179,11 +257,13 @@ export class BaseInterpreter {
         }
       });
     }
+    // Re-observing restarts the initial notification: a listener added later still gets a size.
+    this.resizeObserver.unobserve(element);
     this.resizeObserver.observe(element);
   }
 
   removeResizeObserver(element: Element) {
-    if (this.resizeObserver) {
+    if (this.resizeObserver && !this.scrollProxies.has(element)) {
       this.resizeObserver.unobserve(element);
     }
   }
@@ -218,8 +298,14 @@ export class BaseInterpreter {
   }
 
   createListener(event_name: string, element: Element, bubbles: boolean) {
+    const proxy = element.hasAttribute(SCROLL_PROXY_ATTRIBUTE);
+    if (proxy) {
+      this.registerScrollProxy(element);
+    }
     if (event_name == "resize") {
-      this.createResizeObserver(element);
+      // A proxy's size is the sentinel's, delivered by `registerScrollProxy`.
+      if (proxy) this.observeViewport();
+      else this.createResizeObserver(element);
     } else if (event_name == "visible") {
       this.createIntersectionObserver(element);
     }
@@ -273,6 +359,7 @@ export class BaseInterpreter {
   }
 
   removeAllNonBubblingListeners(element: Element) {
+    this.scrollProxies.delete(element);
     const id = element.getAttribute("data-dioxus-id");
     delete this.local[id];
   }
@@ -534,5 +621,15 @@ export class BaseInterpreter {
   ) {
     setAttributeInner(node as HTMLElement, field, value, ns ?? "");
     if (field === SHADOW_ATTRIBUTE && !ns) this.ensureShadowRoot(node);
+    // Listeners and attributes of one element arrive in no fixed order: a proxy mark that comes
+    // after its listeners moves them from the element's own scroll and size to the viewport's.
+    if (
+      field === SCROLL_PROXY_ATTRIBUTE &&
+      !ns &&
+      (node as ListenerElement).listening
+    ) {
+      this.registerScrollProxy(node as Element);
+      this.resizeObserver?.unobserve(node as Element);
+    }
   }
 }

@@ -4,7 +4,7 @@
 // provide since it doesn't have access to the dom.
 
 import { BaseInterpreter, NodeId } from "./core";
-import { SerializedEvent, serializeEvent, SerializedFileData, extractSerializedFormValues, SerializedFormObject } from "./serialize";
+import { SerializedEvent, scrollerOf, serializeEvent, SerializedFileData, extractSerializedFormValues, SerializedFormObject } from "./serialize";
 
 // These live here and not in core.ts on purpose: desktop and liveview paste the
 // sledgehammer JS (which inlines core.js) and native.js into one module script,
@@ -203,6 +203,8 @@ export class NativeInterpreter extends JSChannel_ {
     this.ipc.postMessage(body);
   }
 
+  // On a scroll proxy this reveals the proxy element itself in the document, which is what
+  // scrolling that element into view means; `scroll` addresses the document's own offset.
   scrollTo(id: NodeId, options: ScrollIntoViewOptions): boolean {
     const node = this.nodes[id];
     if (node instanceof HTMLElement) {
@@ -215,7 +217,7 @@ export class NativeInterpreter extends JSChannel_ {
   scroll(id: NodeId, x: number, y: number, behavior: ScrollBehavior): boolean {
     const node = this.nodes[id];
     if (node instanceof HTMLElement) {
-      node.scroll({ top: y, left: x, behavior });
+      scrollerOf(node).scroll({ top: y, left: x, behavior });
       return true;
     }
     return false;
@@ -224,28 +226,28 @@ export class NativeInterpreter extends JSChannel_ {
   getScrollHeight(id: NodeId): number | undefined {
     const node = this.nodes[id];
     if (node instanceof HTMLElement) {
-      return node.scrollHeight;
+      return scrollerOf(node).scrollHeight;
     }
   }
 
   getScrollLeft(id: NodeId): number | undefined {
     const node = this.nodes[id];
     if (node instanceof HTMLElement) {
-      return node.scrollLeft;
+      return scrollerOf(node).scrollLeft;
     }
   }
 
   getScrollTop(id: NodeId): number | undefined {
     const node = this.nodes[id];
     if (node instanceof HTMLElement) {
-      return node.scrollTop;
+      return scrollerOf(node).scrollTop;
     }
   }
 
   getScrollWidth(id: NodeId): number | undefined {
     const node = this.nodes[id];
     if (node instanceof HTMLElement) {
-      return node.scrollWidth;
+      return scrollerOf(node).scrollWidth;
     }
   }
 
@@ -254,7 +256,11 @@ export class NativeInterpreter extends JSChannel_ {
   ): { type: string; origin: number[]; size: number[] } | undefined {
     const node = this.nodes[id];
     if (node instanceof HTMLElement) {
-      const rect = node.getBoundingClientRect();
+      // A scroll proxy's box is the viewport, the document scroller's visible rectangle, so a
+      // consumer measuring content against the scroller gets document coordinates.
+      const rect = node.hasAttribute("data-dioxus-scroll-proxy")
+        ? new DOMRect(0, 0, document.documentElement.clientWidth, document.documentElement.clientHeight)
+        : node.getBoundingClientRect();
       return {
         type: "GetClientRect",
         origin: [rect.x, rect.y],

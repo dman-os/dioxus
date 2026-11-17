@@ -8,6 +8,102 @@ export type NodeId = number;
 // Attribute set by the renderer on an element that must own a shadow root.
 export const SHADOW_ATTRIBUTE = "data-dioxus-shadow";
 
+// Host styles in shadow roots.
+//
+// A shadow root hides the document's stylesheets from its subtree, so a micro that styles itself
+// with the host's utility classes (the kit/Tailwind bundle and theme) would render unstyled.
+// Every mount's root therefore adopts the host's stylesheets as constructable sheets. There is
+// ONE shared set, not a copy per mount: `adoptedStyleSheets` holds references, and rebuilding a
+// shared sheet with `replaceSync` restyles every mount at once.
+//
+// Cascade, lowest to highest precedence:
+//   1. `@layer kit`: every rule of the host document's sheets. Layered rules lose to every
+//      unlayered rule, so
+//   2. the micro's own sanitized `<style>` inside the shadow root (unlayered) beats the kit;
+//   3. USER_SHEET, the seam for a user stylesheet that comes last. It would be adopted unlayered
+//      after the kit (adopted sheets follow the root's own `<style>` elements in the cascade), so
+//      it beats both. It is not built yet: `hostSheets` returns only the kit for now.
+// `@layer kit, user;` is declared first so a future `@layer user` block outranks the kit
+// whatever order it arrives in.
+//
+// The flow is one way: the shared sheets are only ever adopted INTO shadow roots, so a micro's
+// CSS (inside its root) never reaches the document or another mount.
+export const KIT_LAYER = "kit";
+let kitSheet: CSSStyleSheet | undefined;
+let kitDirty = true;
+
+// Flattens a sheet's rules to text, following `@import` into the imported sheet (which
+// `replaceSync` would refuse as an `@import`). A sheet whose rules the browser withholds
+// (cross-origin without CORS) cannot be adopted by any means, so it is skipped.
+function sheetText(sheet: CSSStyleSheet): string {
+  let rules: CSSRuleList;
+  try {
+    rules = sheet.cssRules;
+  } catch {
+    return "";
+  }
+  let text = "";
+  for (const rule of Array.from(rules)) {
+    text +=
+      rule instanceof CSSImportRule && rule.styleSheet
+        ? sheetText(rule.styleSheet)
+        : rule.cssText;
+    text += "\n";
+  }
+  return text;
+}
+
+function rebuildKit() {
+  const text = Array.from(document.styleSheets, sheetText).join("");
+  kitSheet ??= new CSSStyleSheet();
+  kitSheet.replaceSync(`@layer ${KIT_LAYER}, user;\n@layer ${KIT_LAYER} {\n${text}}`);
+  kitDirty = false;
+}
+
+// A sheet appearing, disappearing or finishing loading marks the kit dirty; the rebuild runs
+// once per burst, in a microtask. Only `<head>` (and the root's direct children) is watched:
+// sheets belong there, and watching the whole document would fire on every UI mutation.
+let rebuildQueued = false;
+function markKitDirty() {
+  kitDirty = true;
+  if (rebuildQueued) return;
+  rebuildQueued = true;
+  queueMicrotask(() => {
+    rebuildQueued = false;
+    rebuildKit();
+  });
+}
+// Starts watching on first use, not at load: the bundle may be evaluated before the document
+// has a `<head>` (a webview's initialization script), and an unused interpreter costs nothing.
+let kitWatching = false;
+function watchKit() {
+  if (kitWatching) return;
+  kitWatching = true;
+  const sheetObserver = new MutationObserver(markKitDirty);
+  sheetObserver.observe(document.documentElement, { childList: true });
+  sheetObserver.observe(document.head, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["href", "media", "disabled"],
+  });
+  // A `<link>` adds its rules when it finishes loading, which is after it was inserted.
+  document.addEventListener(
+    "load",
+    (event) => {
+      if (event.target instanceof HTMLLinkElement) markKitDirty();
+    },
+    true,
+  );
+}
+
+function hostSheets(): CSSStyleSheet[] {
+  watchKit();
+  if (kitDirty) rebuildKit();
+  return [kitSheet as CSSStyleSheet];
+}
+
 // The node that holds `node`'s children: its shadow root when it has one,
 // otherwise `node` itself.
 export function childContainer(node: Node): Node {
@@ -292,6 +388,7 @@ export class BaseInterpreter {
     if (element.shadowRoot) return element.shadowRoot;
     if (!element.hasAttribute?.(SHADOW_ATTRIBUTE)) return node;
     const shadow = element.attachShadow({ mode: "open" });
+    shadow.adoptedStyleSheets = hostSheets();
     shadow.append(...Array.from(element.childNodes));
     return shadow;
   }

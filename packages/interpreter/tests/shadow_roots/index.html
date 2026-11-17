@@ -54,6 +54,11 @@
     it.sendSerializedEvent = (body) => { seen.push(`${body.name}:${body.element}`); };
     core.BaseInterpreter.prototype.initialize.call(it, root, (e) => it.handleEvent(e, e.type, e.bubbles));
 
+    // a host stylesheet that exists before any mount: shadow roots adopt it (layered as `kit`)
+    document.head.append(Object.assign(document.createElement("style"), {
+      textContent: ".kit-probe{color:rgb(1, 2, 3)} .leak-probe{color:rgb(7, 7, 7)}",
+    }));
+
     // plain (light DOM) button, id 5
     it.createElementTop("button"); it.setId(5); it.addTopEventListener("click", true);
     it.appendChildrenToTop(1);
@@ -70,6 +75,22 @@
     const host = it.getNode(1), inner = it.getNode(2), plain = it.getNode(5);
     check("host has an open shadow root", !!host.shadowRoot && host.shadowRoot.mode === "open");
     check("children landed in shadow root, light DOM empty", host.shadowRoot.contains(inner) && host.childNodes.length === 0);
+
+    // host CSS flows in; a micro's unlayered sheet beats the kit; the micro's CSS never leaks out
+    inner.classList.add("kit-probe");
+    check("host stylesheet applies inside the shadow root", getComputedStyle(inner).color === "rgb(1, 2, 3)", getComputedStyle(inner).color);
+    check("the shadow root adopts one shared kit sheet", host.shadowRoot.adoptedStyleSheets.length === 1);
+    const microStyle = document.createElement("style");
+    microStyle.textContent = ".kit-probe{color:rgb(4, 5, 6)} .leak-probe{color:rgb(9, 9, 9)}";
+    host.shadowRoot.prepend(microStyle);
+    check("a micro's own sheet beats the layered kit", getComputedStyle(inner).color === "rgb(4, 5, 6)", getComputedStyle(inner).color);
+    plain.classList.add("leak-probe");
+    check("a micro's CSS does not leak to the document", getComputedStyle(plain).color === "rgb(7, 7, 7)", getComputedStyle(plain).color);
+    document.head.append(Object.assign(document.createElement("style"), { textContent: ".late-probe{background-color:rgb(8, 8, 8)}" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    inner.classList.add("late-probe");
+    check("a sheet added later reaches the shared kit sheet", getComputedStyle(inner).backgroundColor === "rgb(8, 8, 8)", getComputedStyle(inner).backgroundColor);
+    microStyle.remove(); // keep the shadow children as the later order checks expect
 
     inner.click();
     check("click inside shadow reaches handler with inner id", seen.at(-1) === "click:2", seen.join(","));

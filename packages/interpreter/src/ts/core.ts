@@ -118,6 +118,41 @@ function hostSheets(): CSSStyleSheet[] {
   return [kitSheet as CSSStyleSheet];
 }
 
+// A shadow root's own `<style>` elements (a micro's sanitized sheet, a component's built-in
+// styles) are mirrored into one constructable sheet the root adopts after the kit. A page whose
+// CSP has no `'unsafe-inline'` in `style-src-elem` blocks every inline `<style>` element, while
+// constructable sheets are not inline elements and apply regardless, so the mirror is what styles
+// a shadow root there. Where inline styles are allowed the same rules apply twice, to the same
+// effect. The mirror is unlayered and adopted after the kit, so it keeps outranking the kit as the
+// `<style>` element does (see the cascade above).
+//
+// Only mutations that touch a `<style>` element re-read the root: a large subtree (a code view)
+// mutates constantly, and rebuilding the sheet on each of those would cost a scan and a reparse.
+function isStyleNode(node: Node | null): boolean {
+  return node instanceof HTMLStyleElement || node?.parentNode instanceof HTMLStyleElement;
+}
+function adoptInlineStyles(shadow: ShadowRoot) {
+  const mirror = new CSSStyleSheet();
+  shadow.adoptedStyleSheets = [...hostSheets(), mirror];
+  let text = "";
+  const sync = () => {
+    const next = Array.from(shadow.querySelectorAll("style"), (style) => style.textContent ?? "").join("\n");
+    if (next === text) return;
+    text = next;
+    mirror.replaceSync(next);
+  };
+  new MutationObserver((records) => {
+    const touchesStyle = records.some(
+      (record) =>
+        isStyleNode(record.target) ||
+        Array.from(record.addedNodes).some(isStyleNode) ||
+        Array.from(record.removedNodes).some(isStyleNode),
+    );
+    if (touchesStyle) sync();
+  }).observe(shadow, { childList: true, subtree: true, characterData: true });
+  sync();
+}
+
 // The node that holds `node`'s children: its shadow root when it has one,
 // otherwise `node` itself.
 export function childContainer(node: Node): Node {
@@ -475,7 +510,7 @@ export class BaseInterpreter {
     if (element.shadowRoot) return element.shadowRoot;
     if (!element.hasAttribute?.(SHADOW_ATTRIBUTE)) return node;
     const shadow = element.attachShadow({ mode: "open" });
-    shadow.adoptedStyleSheets = hostSheets();
+    adoptInlineStyles(shadow);
     shadow.append(...Array.from(element.childNodes));
     return shadow;
   }

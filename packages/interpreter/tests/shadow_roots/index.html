@@ -54,7 +54,7 @@
     it.sendSerializedEvent = (body) => { seen.push(`${body.name}:${body.element}`); };
     core.BaseInterpreter.prototype.initialize.call(it, root, (e) => it.handleEvent(e, e.type, e.bubbles));
 
-    // a host stylesheet that exists before any mount: shadow roots adopt it (layered as `kit`)
+    // a host stylesheet that exists before any mount: shadow roots adopt it (layered as `host`)
     document.head.append(Object.assign(document.createElement("style"), {
       textContent: ".kit-probe{color:rgb(1, 2, 3)} .leak-probe{color:rgb(7, 7, 7)}",
     }));
@@ -83,7 +83,7 @@
     const microStyle = document.createElement("style");
     microStyle.textContent = ".kit-probe{color:rgb(4, 5, 6)} .leak-probe{color:rgb(9, 9, 9)}";
     host.shadowRoot.prepend(microStyle);
-    check("a micro's own sheet beats the layered kit", getComputedStyle(inner).color === "rgb(4, 5, 6)", getComputedStyle(inner).color);
+    check("a micro's own sheet beats the layered host sheet", getComputedStyle(inner).color === "rgb(4, 5, 6)", getComputedStyle(inner).color);
     plain.classList.add("leak-probe");
     check("a micro's CSS does not leak to the document", getComputedStyle(plain).color === "rgb(7, 7, 7)", getComputedStyle(plain).color);
     document.head.append(Object.assign(document.createElement("style"), { textContent: ".late-probe{background-color:rgb(8, 8, 8)}" }));

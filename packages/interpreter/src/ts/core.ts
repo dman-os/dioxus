@@ -31,20 +31,23 @@ const VIEWPORT_SCROLL_EVENTS = ["scroll", "scrollend"];
 // shared sheet with `replaceSync` restyles every mount at once.
 //
 // Cascade, lowest to highest precedence:
-//   1. `@layer kit`: every rule of the host document's sheets. Layered rules lose to every
-//      unlayered rule, so
-//   2. the micro's own sanitized `<style>` inside the shadow root (unlayered) beats the kit;
+//   1. `@layer host`: every rule of the host document's sheets. Layered rules lose to every
+//      unlayered rule, so (the host's own layers, a design system's `reset`, `tokens`, `kit` and
+//      `user`, nest inside it as `host.reset`, `host.tokens`, `host.kit`, `host.user`; the layer
+//      is named `host` so that a host layer called `kit` does not read as `kit.kit`)
+//   2. the micro's own sanitized `<style>` inside the shadow root (unlayered) beats the host sheet;
 //   3. USER_SHEET, the seam for a user stylesheet that comes last. It would be adopted unlayered
-//      after the kit (adopted sheets follow the root's own `<style>` elements in the cascade), so
-//      it beats both. It is not built yet: `hostSheets` returns only the kit for now.
-// `@layer kit, user;` is declared first so a future `@layer user` block outranks the kit
-// whatever order it arrives in.
+//      after the host sheet (adopted sheets follow the root's own `<style>` elements in the
+//      cascade), so it beats both. It is not built yet: `hostSheets` returns only the host sheet
+//      for now.
+// `@layer host, user;` is declared first so a top-level `@layer user` block outranks everything
+// the host brought, whatever order it arrives in.
 //
 // The flow is one way: the shared sheets are only ever adopted INTO shadow roots, so a micro's
 // CSS (inside its root) never reaches the document or another mount.
-export const KIT_LAYER = "kit";
-let kitSheet: CSSStyleSheet | undefined;
-let kitDirty = true;
+export const HOST_LAYER = "host";
+let hostSheet: CSSStyleSheet | undefined;
+let hostDirty = true;
 
 // Flattens a sheet's rules to text, following `@import` into the imported sheet (which
 // `replaceSync` would refuse as an `@import`). A sheet whose rules the browser withholds
@@ -67,33 +70,33 @@ function sheetText(sheet: CSSStyleSheet): string {
   return text;
 }
 
-function rebuildKit() {
+function rebuildHost() {
   const text = Array.from(document.styleSheets, sheetText).join("");
-  kitSheet ??= new CSSStyleSheet();
-  kitSheet.replaceSync(`@layer ${KIT_LAYER}, user;\n@layer ${KIT_LAYER} {\n${text}}`);
-  kitDirty = false;
+  hostSheet ??= new CSSStyleSheet();
+  hostSheet.replaceSync(`@layer ${HOST_LAYER}, user;\n@layer ${HOST_LAYER} {\n${text}}`);
+  hostDirty = false;
 }
 
-// A sheet appearing, disappearing or finishing loading marks the kit dirty; the rebuild runs
+// A sheet appearing, disappearing or finishing loading marks the host sheet dirty; the rebuild runs
 // once per burst, in a microtask. Only `<head>` (and the root's direct children) is watched:
 // sheets belong there, and watching the whole document would fire on every UI mutation.
 let rebuildQueued = false;
-function markKitDirty() {
-  kitDirty = true;
+function markHostDirty() {
+  hostDirty = true;
   if (rebuildQueued) return;
   rebuildQueued = true;
   queueMicrotask(() => {
     rebuildQueued = false;
-    rebuildKit();
+    rebuildHost();
   });
 }
 // Starts watching on first use, not at load: the bundle may be evaluated before the document
 // has a `<head>` (a webview's initialization script), and an unused interpreter costs nothing.
-let kitWatching = false;
-function watchKit() {
-  if (kitWatching) return;
-  kitWatching = true;
-  const sheetObserver = new MutationObserver(markKitDirty);
+let hostWatching = false;
+function watchHost() {
+  if (hostWatching) return;
+  hostWatching = true;
+  const sheetObserver = new MutationObserver(markHostDirty);
   sheetObserver.observe(document.documentElement, { childList: true });
   sheetObserver.observe(document.head, {
     childList: true,
@@ -106,24 +109,24 @@ function watchKit() {
   document.addEventListener(
     "load",
     (event) => {
-      if (event.target instanceof HTMLLinkElement) markKitDirty();
+      if (event.target instanceof HTMLLinkElement) markHostDirty();
     },
     true,
   );
 }
 
 function hostSheets(): CSSStyleSheet[] {
-  watchKit();
-  if (kitDirty) rebuildKit();
-  return [kitSheet as CSSStyleSheet];
+  watchHost();
+  if (hostDirty) rebuildHost();
+  return [hostSheet as CSSStyleSheet];
 }
 
 // A shadow root's own stylesheet arrives as the text of its host's `data-dioxus-shadow-sheet`
-// attribute and is adopted as a constructable sheet after the kit, never as a `<style>` element.
+// attribute and is adopted as a constructable sheet after the host sheet, never as a `<style>` element.
 // A page whose CSP has no `'unsafe-inline'` in `style-src-elem` refuses every inline `<style>`
 // element (and reports each as a violation), while an attribute's text is data and a
 // constructable sheet is not an inline element, so this styles a shadow root under that CSP. The
-// sheet is unlayered and adopted after the kit, so it outranks the kit (see the cascade above).
+// sheet is unlayered and adopted after the host sheet, so it outranks the host sheet (see the cascade above).
 // The attribute and the shadow mark arrive in no fixed order: whichever comes second applies it.
 export const SHADOW_SHEET_ATTRIBUTE = "data-dioxus-shadow-sheet";
 const ownSheets = new WeakMap<ShadowRoot, CSSStyleSheet>();

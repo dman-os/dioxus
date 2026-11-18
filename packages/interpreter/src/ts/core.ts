@@ -118,39 +118,23 @@ function hostSheets(): CSSStyleSheet[] {
   return [kitSheet as CSSStyleSheet];
 }
 
-// A shadow root's own `<style>` elements (a micro's sanitized sheet, a component's built-in
-// styles) are mirrored into one constructable sheet the root adopts after the kit. A page whose
-// CSP has no `'unsafe-inline'` in `style-src-elem` blocks every inline `<style>` element, while
-// constructable sheets are not inline elements and apply regardless, so the mirror is what styles
-// a shadow root there. Where inline styles are allowed the same rules apply twice, to the same
-// effect. The mirror is unlayered and adopted after the kit, so it keeps outranking the kit as the
-// `<style>` element does (see the cascade above).
-//
-// Only mutations that touch a `<style>` element re-read the root: a large subtree (a code view)
-// mutates constantly, and rebuilding the sheet on each of those would cost a scan and a reparse.
-function isStyleNode(node: Node | null): boolean {
-  return node instanceof HTMLStyleElement || node?.parentNode instanceof HTMLStyleElement;
-}
-function adoptInlineStyles(shadow: ShadowRoot) {
-  const mirror = new CSSStyleSheet();
-  shadow.adoptedStyleSheets = [...hostSheets(), mirror];
-  let text = "";
-  const sync = () => {
-    const next = Array.from(shadow.querySelectorAll("style"), (style) => style.textContent ?? "").join("\n");
-    if (next === text) return;
-    text = next;
-    mirror.replaceSync(next);
-  };
-  new MutationObserver((records) => {
-    const touchesStyle = records.some(
-      (record) =>
-        isStyleNode(record.target) ||
-        Array.from(record.addedNodes).some(isStyleNode) ||
-        Array.from(record.removedNodes).some(isStyleNode),
-    );
-    if (touchesStyle) sync();
-  }).observe(shadow, { childList: true, subtree: true, characterData: true });
-  sync();
+// A shadow root's own stylesheet arrives as the text of its host's `data-dioxus-shadow-sheet`
+// attribute and is adopted as a constructable sheet after the kit, never as a `<style>` element.
+// A page whose CSP has no `'unsafe-inline'` in `style-src-elem` refuses every inline `<style>`
+// element (and reports each as a violation), while an attribute's text is data and a
+// constructable sheet is not an inline element, so this styles a shadow root under that CSP. The
+// sheet is unlayered and adopted after the kit, so it outranks the kit (see the cascade above).
+// The attribute and the shadow mark arrive in no fixed order: whichever comes second applies it.
+export const SHADOW_SHEET_ATTRIBUTE = "data-dioxus-shadow-sheet";
+const ownSheets = new WeakMap<ShadowRoot, CSSStyleSheet>();
+function adoptOwnSheet(shadow: ShadowRoot, text: string) {
+  let own = ownSheets.get(shadow);
+  if (!own) {
+    own = new CSSStyleSheet();
+    ownSheets.set(shadow, own);
+    shadow.adoptedStyleSheets = [...hostSheets(), own];
+  }
+  own.replaceSync(text);
 }
 
 // The node that holds `node`'s children: its shadow root when it has one,
@@ -510,7 +494,7 @@ export class BaseInterpreter {
     if (element.shadowRoot) return element.shadowRoot;
     if (!element.hasAttribute?.(SHADOW_ATTRIBUTE)) return node;
     const shadow = element.attachShadow({ mode: "open" });
-    adoptInlineStyles(shadow);
+    adoptOwnSheet(shadow, element.getAttribute(SHADOW_SHEET_ATTRIBUTE) ?? "");
     shadow.append(...Array.from(element.childNodes));
     return shadow;
   }
@@ -656,6 +640,10 @@ export class BaseInterpreter {
   ) {
     setAttributeInner(node as HTMLElement, field, value, ns ?? "");
     if (field === SHADOW_ATTRIBUTE && !ns) this.ensureShadowRoot(node);
+    if (field === SHADOW_SHEET_ATTRIBUTE && !ns) {
+      const shadow = (node as Element).shadowRoot;
+      if (shadow) adoptOwnSheet(shadow, value);
+    }
     // Listeners and attributes of one element arrive in no fixed order: a proxy mark that comes
     // after its listeners moves them from the element's own scroll and size to the viewport's.
     if (

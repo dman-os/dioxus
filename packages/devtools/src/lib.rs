@@ -200,7 +200,7 @@ where
 ///     "axum works!!!!!".into()
 /// }
 /// ```
-#[cfg(feature = "serve")]
+#[cfg(all(feature = "serve", not(target_family = "wasm")))]
 pub async fn serve_subsecond_with_args<A: Clone, O, F>(args: A, mut callback: impl FnMut(A) -> F)
 where
     F: std::future::Future<Output = O> + 'static,

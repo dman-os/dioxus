@@ -21,6 +21,9 @@ pub use server::*;
 pub mod redirect;
 
 mod launch;
+pub(crate) mod pool;
+#[cfg(target_arch = "wasm32")]
+pub use pool::set_local_spawner;
 
 pub use launch::{launch, launch_cfg};
 

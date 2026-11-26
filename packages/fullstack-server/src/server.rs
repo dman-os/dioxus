@@ -1,3 +1,4 @@
+use crate::pool::LocalPoolHandle;
 use crate::{
     ServeConfig, ServerFunction,
     ssr::{SSRError, SsrRendererPool},
@@ -13,7 +14,6 @@ use dioxus_core::{ComponentFunction, VirtualDom};
 use http::header::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio_util::task::LocalPoolHandle;
 use tower::ServiceExt;
 use tower::util::MapResponse;
 use tower_http::services::fs::ServeFileSystemResponseBody;

@@ -53,12 +53,12 @@ impl FileStream {
     }
 
     /// Create a new `FileStream` from a file path. This is only available on the server.
-    #[cfg(feature = "server")]
+    #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
     pub async fn from_path(file: impl AsRef<Path>) -> Result<Self, std::io::Error> {
         Self::from_path_buf(file.as_ref()).await
     }
 
-    #[cfg(feature = "server")]
+    #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
     async fn from_path_buf(file: &Path) -> Result<Self, std::io::Error> {
         let metadata = file.metadata()?;
         let contents = tokio::fs::File::open(&file).await?;

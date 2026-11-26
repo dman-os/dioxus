@@ -112,6 +112,7 @@ pub fn router(app: fn() -> Element) -> Router {
 /// defaulting to `127.0.0.1:8080` if not set.
 ///
 /// This function uses axum to block on serving the application, and will not return.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn serve<F>(mut serve_it: impl FnMut() -> F) -> !
 where
     F: Future<Output = Result<Router, anyhow::Error>> + 'static,
@@ -131,6 +132,7 @@ where
 ///
 /// To enable hot-reloading of the router, the provided `serve_callback` should return a new `Router`
 /// each time it is called.
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn serve_router(
     mut serve_callback: impl FnMut() -> Pin<Box<dyn Future<Output = Result<Router, anyhow::Error>>>>,
     addr: SocketAddr,
@@ -250,6 +252,7 @@ pub async fn serve_router(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn block_on<T>(app_future: impl Future<Output = T>) {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         handle.block_on(app_future);
@@ -287,4 +290,14 @@ fn apply_base_path<M: 'static>(
     }
 
     router
+}
+
+/// A wasm32 server is a component whose host owns the transport, so there is no listener to serve on.
+/// Build the router with [`router`] and hand it requests instead.
+#[cfg(target_arch = "wasm32")]
+pub fn serve<F>(_serve_it: impl FnMut() -> F) -> !
+where
+    F: Future<Output = Result<Router, anyhow::Error>> + 'static,
+{
+    unimplemented!("a wasm32 server is served by its host; use dioxus_server::router")
 }

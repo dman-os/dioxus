@@ -124,7 +124,6 @@ pub trait DioxusRouterExt {
         Self: Sized;
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl DioxusRouterExt for Router<FullstackState> {
     fn register_server_functions(mut self) -> Router<FullstackState> {
         use std::collections::HashSet;

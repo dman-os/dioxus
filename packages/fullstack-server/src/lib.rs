@@ -20,10 +20,8 @@ pub use server::*;
 
 pub mod redirect;
 
-#[cfg(not(target_arch = "wasm32"))]
 mod launch;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use launch::{launch, launch_cfg};
 
 /// Implementations of the server side of the server function call.

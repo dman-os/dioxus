@@ -80,7 +80,7 @@ lru  = { workspace = true }
 walkdir = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-tokio = { workspace = true, features = ["rt", "sync", "macros"], optional = true }
+tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["rt", "sync", "rt-multi-thread", "macros", "net"] }
